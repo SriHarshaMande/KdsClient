@@ -1,0 +1,26 @@
+syntax = "proto3";
+option java_multiple_files = true;
+option java_package = "com.ncr.proto.gen";
+option java_outer_classname = "Endpoint";
+
+service KdsService{
+    rpc Sync(SyncRequest) returns (SyncResponse) {}
+    rpc Replicate(stream SyncRequest) returns (stream ReplicateData) {}
+}
+
+message SyncRequest {
+    string lastRead = 1;
+    string lastSent = 2;
+    string nodeId = 3;
+}
+
+message SyncResponse {
+    string value = 1;
+}
+
+message ReplicateData {
+    string value = 1;
+    string node_id = 2;
+}
+
+message MyVoid{}
