@@ -1,0 +1,33 @@
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+//    dependencies{
+//        classpath("com.google.protobuf:protobuf-gradle-plugin:0.9.4")
+//    }
+}
+
+//plugins{
+//    id "com.google.protobuf:protobuf-gradle-plugin" version "0.9.4" apply false
+//}
+
+
+rootProject.name = "KdsClient"
+include ':app'
+include ':protobuf'
