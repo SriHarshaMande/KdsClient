@@ -4,23 +4,18 @@ option java_package = "com.ncr.proto.gen";
 option java_outer_classname = "Endpoint";
 
 service KdsService{
-    rpc Sync(SyncRequest) returns (SyncResponse) {}
-    rpc Replicate(stream SyncRequest) returns (stream ReplicateData) {}
+    rpc Replicate(stream SyncRequest) returns (stream Order) {}
 }
 
 message SyncRequest {
-    string lastRead = 1;
-    string lastSent = 2;
-    string nodeId = 3;
+    int32 order_id = 1;
+    int32 item_count = 2;
+    bool is_completed = 3;
 }
 
-message SyncResponse {
-    string value = 1;
+message Order {
+    string order_id = 1;
+    int32 item_count = 2;
+    string received_time = 3;
+    string finished_time = 4;
 }
-
-message ReplicateData {
-    string value = 1;
-    string node_id = 2;
-}
-
-message MyVoid{}
