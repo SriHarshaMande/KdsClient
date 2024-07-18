@@ -14,6 +14,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 
 object  FirebaseVerticalSync {
     val replicationFlow = MutableSharedFlow<Order>(replay = 50)
+    val configFlow = MutableSharedFlow<String>(replay = 1)
 
     fun startVerticalSync(reference: DatabaseReference) {
         val scope = CoroutineScope(EmptyCoroutineContext)
@@ -42,6 +43,35 @@ object  FirebaseVerticalSync {
             }
         })
     }
+
+    fun startConfigSync(reference: DatabaseReference) {
+        val scope = CoroutineScope(EmptyCoroutineContext)
+        reference.addChildEventListener( object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                scope.launch {
+                    configFlow.emit(snapshot.value.toString())
+                }
+            }
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                scope.launch {
+                    configFlow.emit(snapshot.value.toString())
+                }
+            }
+
+            override fun onChildRemoved(snapshot: DataSnapshot) {
+                println("The child removed: " + snapshot.key)
+            }
+
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {
+                println("The child moved: " + snapshot.key)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                println("The read failed: " + error.code)
+            }
+        })
+    }
+
 
     private suspend fun notifyChangesViaFlow(snapshot: DataSnapshot) {
         val data = snapshot.value

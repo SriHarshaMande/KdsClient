@@ -1,10 +1,14 @@
 package com.hac.kdsclient
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -53,8 +57,10 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.net.Inet4Address
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+
 
 enum class Mode {
     Server,
@@ -63,13 +69,19 @@ enum class Mode {
 }
 
 class MainActivity : ComponentActivity() {
+    private var ipAddress = mutableStateOf("http://localhost:50078/")
+
+    //    private var ipAddress = mutableStateOf("http://10.0.2.2:50078/")
+    private val PORT = "50078"
+
     //    private val kdsClient = KdsClient()
     //    private val default: SyncResponse = kdsClient.defaultResponse
     //    private var uri = Uri.parse("http://localhost:50078/")
     //    private val uri by lazy { Uri.parse("http://192.168.0.207:50078/") }
-    private val uri by lazy { Uri.parse("http://10.0.2.2:50078/") }
-    private lateinit var clientService : KdsRpc
-    private lateinit var ref: DatabaseReference
+    private var uri = Uri.parse(ipAddress.value)
+    private lateinit var clientService: KdsRpc
+    private lateinit var ordersDataRef: DatabaseReference
+    private lateinit var configDataRef: DatabaseReference
     private lateinit var server: KdsServer
     private lateinit var deviceName: String
     private val mode = mutableStateOf(Mode.Client)
@@ -84,10 +96,14 @@ class MainActivity : ComponentActivity() {
         db.setPersistenceEnabled(true)
         val currentDate = LocalDateTime.now().format(DateTimeFormatter.ISO_DATE)
         deviceName = Settings.Global.getString(application.contentResolver, "device_name")
-        ref = db.getReference(
+        ordersDataRef = db.getReference(
             "data/${currentDate}"
         )
-        clientService = KdsRpc(uri, ref)
+
+        clientService = KdsRpc(uri, ordersDataRef)
+        configDataRef = db.reference.child("config")
+        FirebaseVerticalSync.startConfigSync(configDataRef)
+
         enableEdgeToEdge()
         setContent {
             KdsClientTheme {
@@ -107,26 +123,74 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun syncConfig(ip: String) {
+        GlobalScope.launch {
+            FirebaseVerticalSync.configFlow.collect {
+                println("Config -> $it")
+                if (uri.host != it) {
+                    clientService.close()
+                    ipAddress.value = "http://$it:$PORT/"
+                    uri = Uri.parse(ipAddress.value)
+                    clientService = KdsRpc(uri, ordersDataRef)
+                    try {
+                        isConnectedToServer.value = false
+//                        clientService.replicate()
+                    } catch (e: Exception) {
+                        isConnectedToServer.value = false
+                        println("Error connecting to server")
+                    }
+                    if (uri.host == ip && mode.value != Mode.Server) {
+                        mode.value = Mode.Server
+                        startServer()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun getIpAddress(): String {
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE)
+        if (connectivityManager is ConnectivityManager) {
+            val link: LinkProperties =
+                connectivityManager.getLinkProperties(connectivityManager.activeNetwork) as LinkProperties
+            Log.e("Network", link.linkAddresses.toString())
+            val ss =
+                link.linkAddresses.filter { it.address.isLoopbackAddress.not() && it.address is Inet4Address }
+
+            return ss.first().address.hostAddress!!
+        }
+        return ""
+    }
+
+    val isConnectedToServer = mutableStateOf(false)
+
     @SuppressLint("CoroutineCreationDuringComposition")
     @Composable
     private fun MainScreen() {
-        if (mode.value == Mode.Offline){
-            FirebaseVerticalSync.startVerticalSync(ref)
+        if (mode.value == Mode.Offline) {
+            FirebaseVerticalSync.startVerticalSync(ordersDataRef)
             val scope = rememberCoroutineScope()
             val rem = remember {
                 orderSnapshotStateMap
             }
-            scope.launch { FirebaseVerticalSync.replicationFlow.collect { order ->
-                orderSnapshotStateMap[order.orderId] = order
+            scope.launch {
+                FirebaseVerticalSync.replicationFlow.collect { order ->
+                    orderSnapshotStateMap[order.orderId] = order
                 }
             }
             DisplayData(rem = rem)
             return
         }
-        val (isConnected, updateConnection) = remember { mutableStateOf(false) }
+        val (isConnected, updateConnection) = remember { isConnectedToServer }
         Column(modifier = Modifier.padding(top = 50.dp)) {
             Text(
                 text = "Running as ${mode.value}",
+                fontSize = 20.sp,
+                fontStyle = FontStyle.Italic
+            )
+            Text(
+                text = "Connected to Server on ${ipAddress.value}",
                 fontSize = 20.sp,
                 fontStyle = FontStyle.Italic
             )
@@ -140,8 +204,9 @@ class MainActivity : ComponentActivity() {
         GlobalScope.launch {
             try {
                 mode.value = Mode.Server
-                server = KdsServer(ref)
+                server = KdsServer(ordersDataRef)
                 server.start()
+                configDataRef.child("serverIp").setValue(getIpAddress())
             } catch (e: Exception) {
                 println("Error starting server")
             }
@@ -164,6 +229,8 @@ class MainActivity : ComponentActivity() {
             }
             OutlinedButton(onClick = {
                 updateSelection(false)
+                uri = Uri.parse(ipAddress.value)
+                clientService = KdsRpc(uri, ordersDataRef)
             }) {
                 Text("Run As Client", fontSize = 30.sp)
             }
@@ -184,16 +251,16 @@ class MainActivity : ComponentActivity() {
             var shouldDoRetry = true
 
             while (shouldDoRetry) {
-                if (deviceName == "client1" && retry > 5) {
-                    startServer()
-                }
+//                if (deviceName == "client1" && retry > 5) {
+//                    startServer()
+//                }
                 launch {
                     try {
                         shouldDoRetry = false
                         clientService.replicate()
                     } catch (e: Exception) {
                         clientService.close()
-                        clientService = KdsRpc(uri, ref)
+                        clientService = KdsRpc(uri, ordersDataRef)
                         delay(1000)
                         shouldDoRetry = true
                     }
@@ -222,6 +289,8 @@ class MainActivity : ComponentActivity() {
         val rem = remember {
             orderSnapshotStateMap
         }
+        val ip: String = getIpAddress()
+        syncConfig(ip)
         val orderId = remember { mutableStateOf("1") }
         val itemCount = remember { mutableStateOf("0") }
         val isCompleted = remember { mutableStateOf("false") }
